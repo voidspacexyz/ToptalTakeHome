@@ -1,0 +1,181 @@
+# =============================================================================
+# docker-compose.yml — LOCAL DEVELOPMENT stack
+#
+# Runs all four services locally with hot reload and exposed ports.
+# postgres and redis are local stand-ins for their Azure equivalents.
+#
+# Usage:
+#   cp .env.example .env        # fill in values
+#   docker compose up --build   # first run
+#   docker compose up           # subsequent runs (no rebuild needed)
+#
+# For production image builds (no local services) use docker-compose.prod.yml:
+#   docker compose -f docker-compose.prod.yml build
+# =============================================================================
+
+name: node-3tier-app2
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # API tier — dev mode: builder stage, bind-mount source, node --watch
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      target: builder          # stop at builder stage; no need for hardened layer locally
+      labels:
+        com.toptal.tier: "api"
+        com.toptal.project: "toptal-devops-interview"
+        com.toptal.owner: "Ram"
+    image: ${ACR_SERVER:-nodeprodacr.azurecr.io}/node-api:${TAG:-latest}
+    container_name: node--local--api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      DBUSER: ${DBUSER:-apiuser}
+      DBPASS: ${DBPASS:-changeme}
+      DB: ${DB:-appdb}
+      DBHOST: ${DBHOST:-postgres}
+      DBPORT: ${DBPORT:-5432}
+    volumes:
+      - ./api:/build:cached      # live source edits without rebuild (builder WORKDIR is /build)
+      - /build/node_modules      # keep container's node_modules isolated
+    command: ["node", "--watch", "bin/www"]
+    ports:
+      - "3000:3000"
+    networks:
+      - app-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/status"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Web tier — dev mode: builder stage, bind-mount source, node --watch
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: builder
+      labels:
+        com.toptal.tier: "web"
+        com.toptal.project: "toptal-devops-interview"
+        com.toptal.owner: "Ram"
+    image: ${ACR_SERVER:-nodeprodacr.azurecr.io}/node-web:${TAG:-latest}
+    container_name: node--local--web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      API_HOST: ${API_HOST:-http://api:3000}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    volumes:
+      - ./web:/build:cached      # live source edits without rebuild (builder WORKDIR is /build)
+      - /build/node_modules      # keep container's node_modules isolated
+    command: ["node", "--watch", "bin/www"]
+    ports:
+      - "8080:3000"
+    networks:
+      - app-net
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — local stand-in for Azure Database for PostgreSQL Flexible Server
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: node--local--postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-apiuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-appdb}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"              # exposed for local psql / DBeaver access
+    networks:
+      - app-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apiuser} -d ${POSTGRES_DB:-appdb}"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Redis — local stand-in for Azure Cache for Redis Basic C0
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: node--local--redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"              # exposed for local redis-cli access
+    networks:
+      - app-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  app-net:
+    name: node--local--net
+    driver: bridge
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres-data:
+    name: node--local--postgres-data

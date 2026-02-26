@@ -59,3 +59,11 @@ typings/
 
 # next.js build output
 .next
+
+# OpenTofu / Terraform secret variable files (never commit real secrets)
+infra/secrets.tfvars
+infra/*.tfvars.local
+# State and lock files if running locally (state is in Azure Blob, but guard locally too)
+infra/.terraform/
+infra/terraform.tfstate
+infra/terraform.tfstate.backup

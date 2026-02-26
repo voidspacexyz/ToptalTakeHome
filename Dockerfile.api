@@ -1,0 +1,64 @@
+# =============================================================================
+# Dockerfile.api — API tier (node-3tier-app2)
+# Image: nodeprodacr.azurecr.io/node-api:<tag>
+# Build context: node-3tier-app2/ (repo root)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1 — builder: install production dependencies only
+# -----------------------------------------------------------------------------
+FROM node:18-alpine AS builder
+
+LABEL stage="builder"
+
+WORKDIR /build
+
+# Copy only the package manifest first to leverage layer cache
+COPY api/package.json ./
+
+# Install production deps; no devDependencies, reproducible install
+RUN npm install --omit=dev --ignore-scripts \
+    && npm cache clean --force
+
+# -----------------------------------------------------------------------------
+# Stage 2 — production: minimal runtime image
+# -----------------------------------------------------------------------------
+FROM node:18-alpine AS production
+
+# OCI image annotations
+LABEL org.opencontainers.image.title="node-api" \
+      org.opencontainers.image.description="Toptal 3-tier Node.js — REST API service (Express + PostgreSQL)" \
+      org.opencontainers.image.vendor="Ram" \
+      org.opencontainers.image.authors="Ram" \
+      org.opencontainers.image.url="https://nodeprodacr.azurecr.io/node-api" \
+      org.opencontainers.image.source="https://github.com/ramvr1256/node-3tier-app2" \
+      org.opencontainers.image.licenses="MIT" \
+      com.toptal.tier="api" \
+      com.toptal.project="toptal-devops-interview" \
+      com.toptal.owner="Ram" \
+      com.toptal.env="production"
+
+ENV NODE_ENV=production \
+    PORT=3000
+
+WORKDIR /app
+
+# Create non-root user and group before copying files
+RUN addgroup --system --gid 1001 nodegroup \
+    && adduser --system --uid 1001 --ingroup nodegroup --no-create-home nodeuser
+
+# Copy pre-built node_modules from builder (avoids compiler tooling in final image)
+COPY --from=builder --chown=nodeuser:nodegroup /build/node_modules ./node_modules
+
+# Copy application source (api/ directory becomes the WORKDIR contents)
+COPY --chown=nodeuser:nodegroup api/ .
+
+USER nodeuser
+
+EXPOSE 3000
+
+# Healthcheck — polls /api/status every 30 s; tolerates 3 failures before unhealthy
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD wget -qO- http://localhost:3000/api/status || exit 1
+
+CMD ["node", "bin/www"]

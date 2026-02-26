@@ -1,0 +1,51 @@
+# =============================================================================
+# docker-compose.prod.yml — PRODUCTION IMAGE BUILD
+#
+# Purpose: build and tag production-grade images ready for ACR/Kubernetes.
+#          No postgres or redis services — those run in Azure.
+#          Not intended to run a functional stack; use for build + push only.
+#
+# Usage:
+#   # Build both images (uses TAG and ACR_SERVER from .env or shell env)
+#   docker compose -f docker-compose.prod.yml build
+#
+#   # Build with an explicit tag
+#   TAG=v1.0.0 docker compose -f docker-compose.prod.yml build
+#
+#   # Build and push in one step
+#   TAG=v1.0.0 docker compose -f docker-compose.prod.yml build --push
+#
+# The build-push script (scripts/docker-build-push.sh) wraps these commands.
+# =============================================================================
+
+name: node-3tier-app2-prod
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # API tier — full multi-stage production build
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      target: production       # full multi-stage build: builder → production
+      labels:
+        com.toptal.tier: "api"
+        com.toptal.project: "toptal-devops-interview"
+        com.toptal.owner: "Ram"
+    image: ${ACR_SERVER:-nodeprodacr.azurecr.io}/node-api:${TAG:-latest}
+
+  # ---------------------------------------------------------------------------
+  # Web tier — full multi-stage production build
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: production
+      labels:
+        com.toptal.tier: "web"
+        com.toptal.project: "toptal-devops-interview"
+        com.toptal.owner: "Ram"
+    image: ${ACR_SERVER:-nodeprodacr.azurecr.io}/node-web:${TAG:-latest}

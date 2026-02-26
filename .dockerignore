@@ -1,0 +1,58 @@
+# =============================================================================
+# .dockerignore — node-3tier-app2/
+# Applies to both Dockerfile.api and Dockerfile.web (build context = repo root)
+# =============================================================================
+
+# Git and VCS
+.git/
+.gitignore
+.gitattributes
+
+# Node modules (dependencies are installed inside the image)
+**/node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Docker artefacts (avoid recursive context loops)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Infrastructure — never bake IaC into app images
+infra/
+*.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# CI/CD
+.github/
+.circleci/
+
+# Scripts & tooling
+scripts/
+
+# Kubernetes & Helm
+k8s/
+
+# Documentation
+*.md
+docs/
+
+# OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Editor
+.vscode/
+.idea/
+
+# Test artefacts
+**/coverage/
+**/*.test.js
+**/test/
