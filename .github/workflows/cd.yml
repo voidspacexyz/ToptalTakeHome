@@ -6,6 +6,8 @@ on:
       - main
     tags:
       - "v*.*.*"
+    paths-ignore:
+      - "k8s/**"    # k8s-only changes are handled by k8s-deploy.yml
   workflow_dispatch:
     inputs:
       image_tag:
@@ -188,10 +190,10 @@ jobs:
       - name: Verify rollouts
         run: |
           echo "=== API pods ==="
-          kubectl rollout status deployment/node-api \
+          kubectl rollout status deployment/node--prod--deploy--api \
             --namespace="${{ env.NAMESPACE }}" --timeout=3m
           echo "=== Web pods ==="
-          kubectl rollout status deployment/node-web \
+          kubectl rollout status deployment/node--prod--deploy--web \
             --namespace="${{ env.NAMESPACE }}" --timeout=3m
           echo ""
           echo "=== Running pods ==="
