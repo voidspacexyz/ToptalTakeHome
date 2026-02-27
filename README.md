@@ -202,4 +202,4 @@ The implementation used helm charts, found in k8s/ folder.
 - Terraform is currently not in the pipeline, but does have a remote state lock file. It also dosent integrate with any cost management or tag organisation tool like Terrateam or Infracost.This was due my personal time limitation. 
 - While SAST is interated, it is not currently a roadblocker on technical debt or code quality that it should be. The ideal relese workflow would run the SAST first, ensure there are not security vulnerabilities and only them proceed to build, release and deploy.
 - Monitoring is enabled at every component level, but currently lacks a unified interface. This was also merely a time constraint and not a technical limitation. The centralised dashboard would take about 2 - 3 hours to complete
-- 
+- Environment level seperation and deployment is currently not done due to resource limitations
