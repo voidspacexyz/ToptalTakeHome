@@ -1,5 +1,11 @@
 # Ramaseshan's Toptal interview task
 
+## URL
+
+URL for testing: https://node--prod--cdn--endpoint-adg9b9c4dsezacac.z02.azurefd.net/  (Sited rendered via a WAF gated edge located CDN, via Azure Frontdoor and Azure Application Gateway)
+
+Version specific endpoint: https://node--prod--cdn--endpoint-adg9b9c4dsezacac.z02.azurefd.net/version/
+
 ## Requirements for Installation 
 
 1. [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?view=azure-cli-latest&pivots=apt)
@@ -92,7 +98,108 @@ Note: TAG is product version.
 - To check web specific tags: `az acr repository show-tags --name nodeprodacr --repository node-web --output table`
 
 
+## Setting up Secrets
+
+General Syntax: `az keyvault secret set --vault-name node-prod-kv --name <key> --value "<value>"` 
+
+Mandatory Keys are follows:
+
+| Key | Description|
+| ---- | ---- |
+| app-ro-password | The App's RO user password, automatically updated by OpenTofu. This is currently declared but unused, but ideal usage would be admin dashboards, BI tools like Metabase etc |
+| app-ro-username | The App's RO user username, automatically updated by OpenTofu. This is currently declared but unused, but ideal usage would be admin dashboards, BI tools like Metabase etc | 
+| app-rw-password | The App's RW user password, automatically updated by OpenTofu. This is currently used, instead of the RO keys, as there no read specific operation in the code  |
+| app-rw-username | The App's RW user username, automatically updated by OpenTofu. This is currently used, instead of the RO keys, as there no read specific operation in the code |
+| pg-admin-password | The postgresql database admin password. Not to be used for anything other than admin operations like user management, db management etc |
+| pg-admin-username | Same as above |
+| postgres-fqdn | The postgresql connection string. Currently not auto populated, read below for commands* . |
+| redis-hostname | The redis server connection string. Auto populated by OpenTofu |
+| redis-primary-access-key | The Redis access key. Auto populated by OpenTofu |
+| redis-primary-key | The redis primary key reference value. Not auto-populated, read below for obtaining the same** . |
+
+* - Ideally, this should get auto-populated, but this failed silently. Considering this was a one-off action, debugging was time boxed and the decision to make manual update. Commands for the same as follows
+ ``` bash
+
+  G_FQDN=$(az postgres flexible-server show \
+    --resource-group RamToptal \
+    --name <your-pg-server-name> \
+    --query fullyQualifiedDomainName -o tsv)
+
+  az keyvault secret set --vault-name node-prod-kv --name postgres-fqdn --value "$PG_FQDN" 
+  ```
+
+** - Same issue as above. The commands are as follows
+    ```bash
+      REDIS_HOST=$(az redis show -g RamToptal -n <redis-name> --query hostName -o tsv)
+      
+      REDIS_KEY=$(az redis list-keys -g RamToptal -n <redis-name> --query primaryKey -o tsv)
+
+      az keyvault secret set --vault-name node-prod-kv --name redis-hostname --value "$REDIS_HOST"
+      
+      az keyvault secret set --vault-name node-prod-kv --name redis-primary-key --value "$REDIS_KEY"
+      ```
 
 
+## K8S layer
 
-docker login -u NodeACRPullTokken01 -p 5KctAMG2KdZrpEKMyZ2gV51QGRl2rXPY80Yl14nGxqWNeVoonYrXJQQJ99CBACGhslBEqg7NAAABAZCRddby nodeprodacr.azurecr.io
+The implementation used helm charts, found in k8s/ folder.
+
+- Both the API and Web are deployed in the `node--prod--ns` namespace. 
+- We have implemented custom api endpoints in both web and api to enable liveness and rediness probes. These endpoints are in no way exhaustive, but are very rudimentary. 
+- The first run of the application going live on a new database, we need to run the following. The following creates your application database. Moved to manual again because this is a one-off step, and tofu validate failed when the same came from OpenTofu. Need to figure this out later. 
+  
+  - First to create the respective users
+    ```bash
+      export PG_DB=nodeapp
+      bash scripts/init-db-users.sh
+    ```
+  - Next is to create the database. 
+    ```bash
+    # Fetch secrets
+      PG_ADMIN_USER=$(az keyvault secret show --vault-name node-prod-kv --name pg-admin-username --query value -o tsv)
+      PG_ADMIN_PASS=$(az keyvault secret show --vault-name node-prod-kv --name pg-admin-password --query value -o tsv)
+      APP_RW_PASS=$(az keyvault secret show --vault-name node-prod-kv --name app-rw-password --query value -o tsv)
+      APP_RO_PASS=$(az keyvault secret show --vault-name node-prod-kv --name app-ro-password --query value -o tsv)
+
+      # Start a sleeping pod inside the VNet
+      kubectl run init-db --restart=Never -n node--prod--ns --image=postgres:16 -- sleep 300
+      kubectl wait pod/init-db -n node--prod--ns --for=condition=Ready --timeout=60s
+
+      # Write SQL locally — shell expands passwords here, no escaping needed in the SQL
+      cat > /tmp/init-db.sql << ENDSQL
+      GRANT CONNECT ON DATABASE appdb TO app_rw, app_ro;
+      GRANT USAGE ON SCHEMA public TO app_rw, app_ro;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_rw;
+      GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_ro;
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_rw, app_ro;
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rw;
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_ro;
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_rw, app_ro;
+      ENDSQL
+
+      # Copy SQL into pod and execute — no shell escaping involved
+      kubectl cp /tmp/init-db.sql node--prod--ns/init-db:/tmp/init-db.sql
+      kubectl exec -n node--prod--ns init-db -- \
+        psql "host=node--prod--postgres.postgres.database.azure.com port=5432 dbname=appdb user=${PG_ADMIN_USER} password=${PG_ADMIN_PASS} sslmode=require" \
+        -v ON_ERROR_STOP=1 -f /tmp/init-db.sql
+
+      # Clean up
+      kubectl delete pod init-db -n node--prod--ns
+    ```
+
+- Once done, just run the following to update the helm charts for every release. Ideally you would never do this manually as the same would handled as part of the CD pipeline as documented in release.yml
+
+  - ```bash
+    export KEY_VAULT_NAME=node-prod-kv
+    bash scripts/aks-deploy.sh
+    ```
+
+
+## Scope for improvement
+
+- I had to deploy resources on a borrowed Azure subscription with many limitations and delayed access, which would not exist in an ideal scenario. I was limited to only 4 VM's of B2s, the basic tier in ACR, Standard tier in Postgresql etc. This limited the scale of platform showcase that was possible.
+- The application itself was very elementary to showcase the brevity of the components. For instance, the application did not have any static assets at all, to actually load into the CDN. Some of these limitations like a healthcheck endpoint and readiness endpoint etc, were written but still the application was too skeleton to showcase more sensible things.
+- Terraform is currently not in the pipeline, but does have a remote state lock file. It also dosent integrate with any cost management or tag organisation tool like Terrateam or Infracost.This was due my personal time limitation. 
+- While SAST is interated, it is not currently a roadblocker on technical debt or code quality that it should be. The ideal relese workflow would run the SAST first, ensure there are not security vulnerabilities and only them proceed to build, release and deploy.
+- Monitoring is enabled at every component level, but currently lacks a unified interface. This was also merely a time constraint and not a technical limitation. The centralised dashboard would take about 2 - 3 hours to complete
+- 
