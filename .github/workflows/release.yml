@@ -178,9 +178,9 @@ jobs:
       # ── 15. Verify rollouts ────────────────────────────────────────────
       - name: Verify rollouts
         run: |
-          kubectl rollout status deployment/node-api \
+          kubectl rollout status deployment/node--prod--deploy--api \
             --namespace="${{ env.NAMESPACE }}" --timeout=3m
-          kubectl rollout status deployment/node-web \
+          kubectl rollout status deployment/node--prod--deploy--web \
             --namespace="${{ env.NAMESPACE }}" --timeout=3m
           echo ""
           kubectl get pods -n "${{ env.NAMESPACE }}" -o wide
