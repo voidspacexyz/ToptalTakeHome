@@ -2,6 +2,8 @@ var express = require('express');
 var router = express.Router();
 var request = require('request');
 
+// Bump this manually on each release to match the Git tag.
+var APP_VERSION = 'v1.0.0';
 
 var api_url = process.env.API_HOST + '/api/status';
 
@@ -24,6 +26,12 @@ router.get('/', function(req, res, next) {
             }
         }
     );
+});
+
+/* GET version — returns a plain-text version string.
+ * Update APP_VERSION at the top of this file before each release. */
+router.get('/version', function(req, res) {
+    res.type('text/plain').send('App running on version ' + APP_VERSION);
 });
 
 module.exports = router;

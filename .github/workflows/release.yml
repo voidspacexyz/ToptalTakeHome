@@ -1,0 +1,219 @@
+name: Release — Build, Push & Deploy
+
+# Triggered exclusively by a semver tag push (e.g. v1.2.3 or v1.2.0-rc.1).
+# Builds Docker images tagged with the version AND `latest`, deploys to AKS,
+# and creates a GitHub Release with auto-generated notes.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"       # v1.2.3
+      - "v[0-9]+.[0-9]+.[0-9]+-*"     # v1.2.3-rc.1, v1.2.3-hotfix.1
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # never cancel an in-flight release
+
+env:
+  ACR_REGISTRY: ${{ secrets.ACR_LOGIN_SERVER }}
+  AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
+  AKS_RESOURCE_GROUP: ${{ secrets.AKS_RESOURCE_GROUP }}
+  NAMESPACE: node--prod--ns
+  KEY_VAULT_NAME: node-prod-kv
+
+jobs:
+  release:
+    name: Release ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write   # needed to create GitHub Releases
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history required for auto-generated release notes
+
+      # ── 2. Derive image tag from Git tag ───────────────────────────────
+      - name: Set image tag
+        id: tag
+        run: |
+          # github.ref_name is already the bare tag e.g. "v1.2.3"
+          IMAGE_TAG="${{ github.ref_name }}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Releasing: ${IMAGE_TAG}"
+
+      # ── 3. Log in to ACR ───────────────────────────────────────────────
+      - name: Log in to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      # ── 4. Set up Docker Buildx (layer cache support) ─────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── 5. Build & push API image ──────────────────────────────────────
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.api
+          push: true
+          tags: |
+            ${{ env.ACR_REGISTRY }}/node-api:${{ steps.tag.outputs.image_tag }}
+            ${{ env.ACR_REGISTRY }}/node-api:latest
+          cache-from: type=registry,ref=${{ env.ACR_REGISTRY }}/node-api:buildcache
+          cache-to:   type=registry,ref=${{ env.ACR_REGISTRY }}/node-api:buildcache,mode=max
+
+      # ── 6. Build & push Web image ──────────────────────────────────────
+      - name: Build and push Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          tags: |
+            ${{ env.ACR_REGISTRY }}/node-web:${{ steps.tag.outputs.image_tag }}
+            ${{ env.ACR_REGISTRY }}/node-web:latest
+          cache-from: type=registry,ref=${{ env.ACR_REGISTRY }}/node-web:buildcache
+          cache-to:   type=registry,ref=${{ env.ACR_REGISTRY }}/node-web:buildcache,mode=max
+
+      # ── 7. Authenticate to Azure ───────────────────────────────────────
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # ── 8. Set AKS kubectl context ─────────────────────────────────────
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+
+      # ── 9. Fetch runtime secrets from Azure Key Vault ──────────────────
+      - name: Fetch secrets from Key Vault
+        id: kv-secrets
+        run: |
+          PG_HOST=$(az keyvault secret show \
+            --vault-name "${{ env.KEY_VAULT_NAME }}" \
+            --name postgres-fqdn --query value -o tsv)
+          APP_RW_PASS=$(az keyvault secret show \
+            --vault-name "${{ env.KEY_VAULT_NAME }}" \
+            --name app-rw-password --query value -o tsv)
+          REDIS_KEY=$(az keyvault secret show \
+            --vault-name "${{ env.KEY_VAULT_NAME }}" \
+            --name redis-primary-key --query value -o tsv)
+          REDIS_HOST=$(az keyvault secret show \
+            --vault-name "${{ env.KEY_VAULT_NAME }}" \
+            --name redis-hostname --query value -o tsv)
+          echo "::add-mask::${APP_RW_PASS}"
+          echo "::add-mask::${REDIS_KEY}"
+          echo "pg_host=${PG_HOST}"           >> "$GITHUB_OUTPUT"
+          echo "app_rw_pass=${APP_RW_PASS}"   >> "$GITHUB_OUTPUT"
+          echo "redis_key=${REDIS_KEY}"        >> "$GITHUB_OUTPUT"
+          echo "redis_host=${REDIS_HOST}"      >> "$GITHUB_OUTPUT"
+
+      # ── 10. Apply namespace & RBAC (idempotent) ────────────────────────
+      - name: Apply namespace and RBAC manifests
+        run: |
+          kubectl apply -f k8s/manifests/namespace.yaml
+          kubectl apply -f k8s/manifests/rbac.yaml
+
+      # ── 11. Refresh ACR pull secret ────────────────────────────────────
+      - name: Refresh ACR image-pull secret
+        run: |
+          kubectl create secret docker-registry acr-pull-secret \
+            --namespace="${{ env.NAMESPACE }}" \
+            --docker-server="${{ env.ACR_REGISTRY }}" \
+            --docker-username="${{ secrets.ACR_USERNAME }}" \
+            --docker-password="${{ secrets.ACR_PASSWORD }}" \
+            --save-config \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ── 12. Stamp appVersion into Chart.yaml files ─────────────────────
+      - name: Update Helm Chart appVersion
+        run: |
+          TAG="${{ steps.tag.outputs.image_tag }}"
+          sed -i "s/^appVersion:.*$/appVersion: \"${TAG}\"/" k8s/helm/api/Chart.yaml
+          sed -i "s/^appVersion:.*$/appVersion: \"${TAG}\"/" k8s/helm/web/Chart.yaml
+          echo "Set appVersion to ${TAG} in both Chart.yaml files"
+
+      # ── 13. Helm release — API chart ───────────────────────────────────
+      - name: Helm upgrade API chart
+        run: |
+          helm upgrade --install node-api ./k8s/helm/api \
+            --namespace="${{ env.NAMESPACE }}" \
+            --create-namespace \
+            -f k8s/helm/values-prod.yaml \
+            --set image.repository="${{ env.ACR_REGISTRY }}/node-api" \
+            --set image.tag="${{ steps.tag.outputs.image_tag }}" \
+            --set dbSecret.user="app_rw" \
+            --set dbSecret.password="${{ steps.kv-secrets.outputs.app_rw_pass }}" \
+            --set db.host="${{ steps.kv-secrets.outputs.pg_host }}" \
+            --atomic \
+            --timeout=5m \
+            --wait
+
+      # ── 14. Helm release — Web chart ───────────────────────────────────
+      - name: Helm upgrade Web chart
+        run: |
+          REDIS_URL="rediss://:${{ steps.kv-secrets.outputs.redis_key }}@${{ steps.kv-secrets.outputs.redis_host }}:6380"
+          helm upgrade --install node-web ./k8s/helm/web \
+            --namespace="${{ env.NAMESPACE }}" \
+            --create-namespace \
+            -f k8s/helm/values-prod.yaml \
+            --set image.repository="${{ env.ACR_REGISTRY }}/node-web" \
+            --set image.tag="${{ steps.tag.outputs.image_tag }}" \
+            --set appSecret.redisUrl="${REDIS_URL}" \
+            --atomic \
+            --timeout=5m \
+            --wait
+
+      # ── 15. Verify rollouts ────────────────────────────────────────────
+      - name: Verify rollouts
+        run: |
+          kubectl rollout status deployment/node-api \
+            --namespace="${{ env.NAMESPACE }}" --timeout=3m
+          kubectl rollout status deployment/node-web \
+            --namespace="${{ env.NAMESPACE }}" --timeout=3m
+          echo ""
+          kubectl get pods -n "${{ env.NAMESPACE }}" -o wide
+
+      # ── 16. Create GitHub Release ──────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.image_tag }}
+          generate_release_notes: true
+          body: |
+            ## Docker Images
+
+            | Image | Tags |
+            |-------|------|
+            | `node-api` | `${{ steps.tag.outputs.image_tag }}`, `latest` |
+            | `node-web` | `${{ steps.tag.outputs.image_tag }}`, `latest` |
+
+            ### Pull
+            ```
+            docker pull ${{ env.ACR_REGISTRY }}/node-api:${{ steps.tag.outputs.image_tag }}
+            docker pull ${{ env.ACR_REGISTRY }}/node-web:${{ steps.tag.outputs.image_tag }}
+            ```
+
+      # ── 17. Job summary ────────────────────────────────────────────────
+      - name: Release summary
+        run: |
+          echo "### Released ${{ steps.tag.outputs.image_tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | \`${{ steps.tag.outputs.image_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| API image | \`${{ env.ACR_REGISTRY }}/node-api:${{ steps.tag.outputs.image_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Web image | \`${{ env.ACR_REGISTRY }}/node-web:${{ steps.tag.outputs.image_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Cluster | \`${{ env.AKS_CLUSTER_NAME }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Released by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"

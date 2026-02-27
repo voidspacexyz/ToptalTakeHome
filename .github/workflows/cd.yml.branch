@@ -1,13 +1,22 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# DISABLED — rename this file to `cd.yml` to activate.
+#
+# Enable this workflow when a proper branching strategy (e.g. GitFlow,
+# trunk-based with feature branches) is in place so that every merge to
+# `main` triggers a continuous deployment to production.
+#
+# At that point also ensure `release.yml` does NOT trigger on `main` branch
+# pushes to avoid duplicate deploys when a semver tag is pushed.
+# ──────────────────────────────────────────────────────────────────────────────
+
 name: CD — Build, Push & Deploy
 
 on:
   push:
     branches:
       - main
-    tags:
-      - "v*.*.*"
     paths-ignore:
-      - "k8s/**"    # k8s-only changes are handled by k8s-deploy.yml
+      - "k8s/**"
   workflow_dispatch:
     inputs:
       image_tag:
