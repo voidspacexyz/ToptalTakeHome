@@ -1,0 +1,123 @@
+# Kubernetes RBAC for node-3tier-app2
+#
+# Principle of least privilege:
+#   - Dedicated ServiceAccount per tier; no shared default SA.
+#   - automountServiceAccountToken: false — pods do NOT call the K8s API directly.
+#   - Roles are intentionally empty for the application tiers; they exist as
+#     explicit anchors so permissions can be extended in scope without touching
+#     the RoleBinding or deployment spec.
+#
+# All resources are scoped to the node--prod--ns namespace.
+# Apply: kubectl apply -f k8s/manifests/rbac.yaml -n node--prod--ns
+
+# ── ServiceAccounts ────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node--prod--sa--api
+  namespace: node--prod--ns
+  labels:
+    app: node-api
+    env: prod
+    owner: Ram
+    purpose: Toptal
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node--prod--sa--web
+  namespace: node--prod--ns
+  labels:
+    app: node-web
+    env: prod
+    owner: Ram
+    purpose: Toptal
+automountServiceAccountToken: false
+
+# ── Roles ──────────────────────────────────────────────────────────────────
+---
+# API role: allows the api pod to read its own ConfigMap and Secret.
+# The kubelet resolves envFrom references, but this role exists so that
+# any init-container or operational tooling running under this SA can inspect
+# the same resources without elevated cluster permissions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: node--prod--role--api
+  namespace: node--prod--ns
+  labels:
+    app: node-api
+    env: prod
+    owner: Ram
+    purpose: Toptal
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["node--prod--cm--api"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["node--prod--secret--api"]
+    verbs: ["get"]
+---
+# Web role: mirrors the API role for the web tier's ConfigMap and Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: node--prod--role--web
+  namespace: node--prod--ns
+  labels:
+    app: node-web
+    env: prod
+    owner: Ram
+    purpose: Toptal
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["node--prod--cm--web"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["node--prod--secret--web"]
+    verbs: ["get"]
+
+# ── RoleBindings ───────────────────────────────────────────────────────────
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: node--prod--rb--api
+  namespace: node--prod--ns
+  labels:
+    app: node-api
+    env: prod
+    owner: Ram
+    purpose: Toptal
+subjects:
+  - kind: ServiceAccount
+    name: node--prod--sa--api
+    namespace: node--prod--ns
+roleRef:
+  kind: Role
+  name: node--prod--role--api
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: node--prod--rb--web
+  namespace: node--prod--ns
+  labels:
+    app: node-web
+    env: prod
+    owner: Ram
+    purpose: Toptal
+subjects:
+  - kind: ServiceAccount
+    name: node--prod--sa--web
+    namespace: node--prod--ns
+roleRef:
+  kind: Role
+  name: node--prod--role--web
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: node--prod--ns
+  labels:
+    name: node--prod--ns
+    env: prod
+    owner: Ram
+    purpose: Toptal

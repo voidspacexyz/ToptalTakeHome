@@ -8,32 +8,33 @@ const conString = {
     database: process.env.DB,
     password: process.env.DBPASS,
     host: process.env.DBHOST,
-    port: process.env.DBPORT                
+    port: process.env.DBPORT,
+    ssl: { rejectUnauthorized: false }  // Azure PostgreSQL Flexible Server requires SSL
 };
+
+// Shared pool — created once at startup, reused across requests
+// Delete PGSSLMODE env var so it cannot override the explicit ssl: config above.
+// Azure PostgreSQL Flexible Server mandates SSL; pg respects libpq env vars which
+// can silently disable encryption if set in the container environment.
+delete process.env.PGSSLMODE;
+const pool = new pg.Pool(conString);
 
 // Routes
 app.get('/api/status', function(req, res) {
-//'SELECT now() as time', [], function(err, result
-  
-  const Pool = require('pg').Pool
-  const pool = new Pool(conString)
-  // connection using created pool
   pool.connect((err, client, release) => {
     if (err) {
-      return console.error('Error acquiring client', err.stack)
+      console.error('Error acquiring client', err.stack);
+      return res.status(503).json({ error: 'Database connection failed', message: err.message });
     }
     client.query('SELECT now() as time', (err, result) => {
-      release()
-    if (err) {
-      console.log(err);
-      return console.error('Error executing query', err.stack)
-    }
-    res.status(200).send(result.rows);
+      release();
+      if (err) {
+        console.error('Error executing query', err.stack);
+        return res.status(503).json({ error: 'Query failed', message: err.message });
+      }
+      res.status(200).json(result.rows);
+    });
   });
-});
-
-  // pool shutdown
-  pool.end()
 });
 
 // catch 404 and forward to error handler

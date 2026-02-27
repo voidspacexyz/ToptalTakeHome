@@ -1,0 +1,13 @@
+apiVersion: v2
+name: node-web
+description: Helm chart for the Node.js Web tier of the 3-tier application
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - nodejs
+  - web
+  - toptal
+maintainers:
+  - name: Ram
+    email: ram@toptal.com

@@ -1,0 +1,86 @@
+# values-prod.yaml — Production overrides shared across API and Web Helm charts.
+#
+# Usage:
+#   helm upgrade --install node-api   ./k8s/helm/api   -f k8s/helm/values-prod.yaml --set dbSecret.user=<val> --set dbSecret.password=<val>
+#   helm upgrade --install node-web   ./k8s/helm/web   -f k8s/helm/values-prod.yaml --set appSecret.redisUrl=<val>
+#
+# Both charts use this file; chart-specific keys (db.*, app.*, dbSecret.*, appSecret.*)
+# are silently ignored by the chart that does not define them.
+
+# ── Common ──────────────────────────────────────────────────────────────────
+env: prod
+
+replicaCount: 2
+
+image:
+  pullPolicy: Always   # always pull on production to pick up latest re-tagged images
+  repository: nodeprodacr.azurecr.io/node-api  # overridden per chart via --set image.repository=...
+  tag: "latest"        # overridden to exact Git tag on release (e.g. v1.0.0)
+
+imagePullSecrets:
+  - name: acr-pull-secret
+
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "512Mi"
+
+hpa:
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  maxUnavailable: 1
+
+# ── API-specific (ignored by web chart) ─────────────────────────────────────
+
+db:
+  host: "node--prod--postgres.postgres.database.azure.com"
+  name: "appdb"
+  port: "5432"
+
+# dbSecret.user and dbSecret.password must be passed at deploy time via --set
+# or injected as TF_VAR_* in CI/CD — do NOT commit plaintext credentials here.
+
+# ── Web-specific (ignored by api chart) ─────────────────────────────────────
+# image.repository for web is overridden below when running the web chart deploy:
+#   --set image.repository=nodeprodacr.azurecr.io/node-web
+
+app:
+  apiHost: "http://node--prod--svc--api:3000"
+
+# appSecret.redisUrl must be passed at deploy time via --set.
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/ssl-redirect: "false"
+    appgw.ingress.kubernetes.io/connection-draining: "true"
+    appgw.ingress.kubernetes.io/connection-draining-timeout: "30"
+  host: ""   # set to Application Gateway public DNS after infra provision
+  tls: []
+
+# ── Pod scheduling ──────────────────────────────────────────────────────────
+nodeSelector:
+  agentpool: user   # user/workload node pool label as provisioned by AKS
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - node-api
+                  - node-web
+          topologyKey: kubernetes.io/hostname

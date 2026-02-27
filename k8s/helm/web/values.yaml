@@ -1,0 +1,82 @@
+# Default values for the Web Helm chart.
+# Override per-environment using values-prod.yaml or --set flags.
+
+env: prod
+
+replicaCount: 2
+
+image:
+  repository: nodeprodacr.azurecr.io/node-web
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: acr-pull-secret
+
+serviceAccountName: node--prod--sa--web
+
+# Non-secret environment variables — rendered into ConfigMap
+app:
+  apiHost: "http://node--prod--svc--api:3000"
+
+# Secret environment variables — rendered into Secret (plain text; template applies b64enc)
+appSecret:
+  redisUrl: ""  # e.g. rediss://:password@node--prod--redis.redis.cache.windows.net:6380/0
+
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/ssl-redirect: "false"
+    appgw.ingress.kubernetes.io/connection-draining: "true"
+    appgw.ingress.kubernetes.io/connection-draining-timeout: "30"
+  host: ""   # e.g. myapp.eastus.cloudapp.azure.com — set in values-prod.yaml
+  tls: []
+  # tls:
+  #   - secretName: node-web-tls
+  #     hosts:
+  #       - myapp.example.com
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+# Liveness / readiness probes
+probes:
+  liveness:
+    path: /
+    initialDelaySeconds: 45
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+hpa:
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  maxUnavailable: 1
+
+podAnnotations: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

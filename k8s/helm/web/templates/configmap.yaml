@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "web.cmname" . }}
+  labels:
+    {{- include "web.labels" . | nindent 4 }}
+data:
+  API_HOST: {{ .Values.app.apiHost | quote }}

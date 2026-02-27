@@ -135,6 +135,16 @@ output "postgresql_database_name" {
   value       = azurerm_postgresql_flexible_server_database.app.name
 }
 
+output "app_rw_kv_secret_name" {
+  description = "Key Vault secret name holding the app_rw PostgreSQL password (fetch: az keyvault secret show --vault-name <kv> --name app-rw-password)"
+  value       = azurerm_key_vault_secret.app_rw_password.name
+}
+
+output "app_ro_kv_secret_name" {
+  description = "Key Vault secret name holding the app_ro PostgreSQL password (fetch: az keyvault secret show --vault-name <kv> --name app-ro-password)"
+  value       = azurerm_key_vault_secret.app_ro_password.name
+}
+
 # ---------------------------------------------------------------------------
 # AKS — Phase 1.6
 # ---------------------------------------------------------------------------

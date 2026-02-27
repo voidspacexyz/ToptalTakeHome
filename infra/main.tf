@@ -447,6 +447,65 @@ resource "azurerm_key_vault_secret" "pg_admin_password" {
 }
 
 # ---------------------------------------------------------------------------
+# Application DB users — app_rw (read/write) and app_ro (read-only)
+#
+# Passwords are generated here and stored in Key Vault.  The actual PostgreSQL
+# roles are NOT created by Terraform (no public PG access means the provider
+# cannot connect).  Run scripts/init-db-users.sh once after `tofu apply` from
+# any host with network access to the private PostgreSQL endpoint.
+# ---------------------------------------------------------------------------
+
+resource "random_password" "app_rw" {
+  length           = 24
+  special          = true
+  override_special = "!#$%&*-_=+?" # exclude chars that break psql connection strings
+  min_upper        = 2
+  min_lower        = 2
+  min_numeric      = 2
+  min_special      = 2
+}
+
+resource "random_password" "app_ro" {
+  length           = 24
+  special          = true
+  override_special = "!#$%&*-_=+?"
+  min_upper        = 2
+  min_lower        = 2
+  min_numeric      = 2
+  min_special      = 2
+}
+
+# Read-write app user credentials
+resource "azurerm_key_vault_secret" "app_rw_username" {
+  name         = "app-rw-username"
+  value        = "app_rw"
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_key_vault_access_policy.deployer]
+}
+
+resource "azurerm_key_vault_secret" "app_rw_password" {
+  name         = "app-rw-password"
+  value        = random_password.app_rw.result
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_key_vault_access_policy.deployer]
+}
+
+# Read-only app user credentials
+resource "azurerm_key_vault_secret" "app_ro_username" {
+  name         = "app-ro-username"
+  value        = "app_ro"
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_key_vault_access_policy.deployer]
+}
+
+resource "azurerm_key_vault_secret" "app_ro_password" {
+  name         = "app-ro-password"
+  value        = random_password.app_ro.result
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_key_vault_access_policy.deployer]
+}
+
+# ---------------------------------------------------------------------------
 # Phase 1.6 — Azure Kubernetes Service (AKS)
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,73 @@
+# Default values for the API Helm chart.
+# Override per-environment using values-prod.yaml or --set flags.
+
+env: prod
+
+replicaCount: 2
+
+image:
+  repository: nodeprodacr.azurecr.io/node-api
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: acr-pull-secret
+
+serviceAccountName: node--prod--sa--api
+
+# Non-secret environment variables — rendered into ConfigMap
+db:
+  host: "node--prod--postgres.postgres.database.azure.com"
+  name: "appdb"
+  port: "5432"
+
+# Secret environment variables — rendered into Secret (plain text; template applies b64enc)
+# user: fixed username created by scripts/init-db-users.sh
+# password: fetch from Key Vault secret 'app-rw-password' after tofu apply
+dbSecret:
+  user: "app_rw"
+  password: ""  # set via --set or values-prod.yaml (from KV secret app-rw-password)
+
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+# Liveness / readiness probes
+probes:
+  liveness:
+    path: /api/status
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /api/status
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+hpa:
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  maxUnavailable: 1
+
+podAnnotations: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
