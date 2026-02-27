@@ -3,7 +3,7 @@ var router = express.Router();
 var request = require('request');
 
 // Bump this manually on each release to match the Git tag.
-var APP_VERSION = 'v1.0.0';
+var APP_VERSION = 'v1.1.1';
 
 var api_url = process.env.API_HOST + '/api/status';
 
