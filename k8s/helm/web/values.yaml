@@ -70,13 +70,3 @@ hpa:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 
-pdb:
-  maxUnavailable: 1
-
-podAnnotations: {}
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}

@@ -1,11 +1,10 @@
 # values-prod.yaml — Production overrides shared across API and Web Helm charts.
 #
-# Usage:
+# Usage (if required to run individually outside of CI/CD):
 #   helm upgrade --install node-api   ./k8s/helm/api   -f k8s/helm/values-prod.yaml --set dbSecret.user=<val> --set dbSecret.password=<val>
 #   helm upgrade --install node-web   ./k8s/helm/web   -f k8s/helm/values-prod.yaml --set appSecret.redisUrl=<val>
 #
-# Both charts use this file; chart-specific keys (db.*, app.*, dbSecret.*, appSecret.*)
-# are silently ignored by the chart that does not define them.
+# Both charts use this file.
 
 # ── Common ──────────────────────────────────────────────────────────────────
 env: prod
@@ -33,8 +32,6 @@ hpa:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 
-pdb:
-  maxUnavailable: 1
 
 # ── API-specific (ignored by web chart) ─────────────────────────────────────
 
@@ -53,7 +50,7 @@ db:
 app:
   apiHost: "http://node--prod--svc--api:3000"
 
-# appSecret.redisUrl must be passed at deploy time via --set.
+# appSecret.redisUrl must be passed at deploy time via --set if not set by OpenTofu
 
 ingress:
   enabled: true
@@ -62,14 +59,12 @@ ingress:
     appgw.ingress.kubernetes.io/ssl-redirect: "false"
     appgw.ingress.kubernetes.io/connection-draining: "true"
     appgw.ingress.kubernetes.io/connection-draining-timeout: "30"
-  host: ""   # set to Application Gateway public DNS after infra provision
-  tls: []
+  host: ""   # considering, I do not have ready access to a domain name, leaving this black and allowing to be proxied by CDN.
+  tls: []    # SSL handling at the CDN level, so no TLS configuration for the Ingress itself.
 
 # ── Pod scheduling ──────────────────────────────────────────────────────────
 nodeSelector:
-  agentpool: user   # user/workload node pool label as provisioned by AKS
-
-tolerations: []
+  agentpool: user   # user node pool label as provisioned by AKS
 
 affinity:
   podAntiAffinity:
