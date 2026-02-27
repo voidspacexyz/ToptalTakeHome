@@ -15,11 +15,11 @@ CI/CD Pipeline git mirror: (https://github.com/voidspacexyz/ToptalTakeHome/actio
 
 1. [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?view=azure-cli-latest&pivots=apt)
 2. [OpenTofu or Terraform](https://opentofu.org/)
-3. kubectl and kubenamespace
-4. Docker
-5. Azure Subscription and a resource group (A copy of subscription ID and Resource Group ID)
+3. (kubectl)[https://kubernetes.io/docs/tasks/tools/] and (kubens)[https://webinstall.dev/kubens/]
+4. (Docker)[https://docs.docker.com]
+5. Azure Subscription and a resource group (A copy of subscription ID and Resource Group Name)
 
-Note: I had access to an azure cloud at the point of preparation, similar setup can be implemented in AWS or GCP or smaller cloud providers like DigitalOcean or Linode etc
+Note: I had access to an azure cloud at the point of preparation, but similar setup can be implemented in AWS or GCP or smaller cloud providers like DigitalOcean or Linode etc without compromising the architecture
 
 
 ## Setting up the cloud
