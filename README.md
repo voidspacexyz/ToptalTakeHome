@@ -6,6 +6,8 @@ URL for testing: https://node--prod--cdn--endpoint-adg9b9c4dsezacac.z02.azurefd.
 
 Version specific endpoint: https://node--prod--cdn--endpoint-adg9b9c4dsezacac.z02.azurefd.net/version/
 
+CI/CD Pipeline git mirror: (https://github.com/voidspacexyz/ToptalTakeHome/actions/runs/22476979552)[https://github.com/voidspacexyz/ToptalTakeHome/]
+
 ## Requirements for Installation 
 
 1. [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux?view=azure-cli-latest&pivots=apt)
